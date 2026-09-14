@@ -25,12 +25,15 @@ func main() {
 		log.Fatalf("open library failed: %v", err)
 	}
 
-	db, err := db.Connect(lib.DbPath())
+	conn, err := db.Connect(lib.DbPath())
 	if err != nil {
 		log.Fatalf("database connection establish failed: %v", err)
 	}
 
-	// pass the db instance to my chi api?
+	err = db.Migrate(conn)
+	if err != nil {
+		log.Fatalf("failed to apply migrations: %v", err)
+	}
 
 	http.ListenAndServe(":3000", r)
 }

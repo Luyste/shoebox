@@ -7,6 +7,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/luyste/shoebox/internal/api"
 	"github.com/luyste/shoebox/internal/db"
 	"github.com/luyste/shoebox/internal/library"
 )
@@ -14,11 +15,7 @@ import (
 func main() {
 	var dir string
 	flag.StringVar(&dir, "dir", "./data", "library root")
-
 	flag.Parse()
-
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
 
 	lib, err := library.New(dir)
 	if err != nil {
@@ -35,5 +32,11 @@ func main() {
 		log.Fatalf("failed to apply migrations: %v", err)
 	}
 
-	http.ListenAndServe(":3000", r)
+	a := api.New(conn, lib)
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+
+	r.Mount("/api", a.Router())
+
+	log.Fatal(http.ListenAndServe(":3000", r))
 }

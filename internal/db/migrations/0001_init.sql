@@ -3,7 +3,7 @@ CREATE TABLE media (
     sha256 TEXT NOT NULL UNIQUE,
     kind TEXT check(kind = 'photo' or kind = 'video') NOT NULL,
     original_name TEXT NOT NULL,
-    rel_path TEXT NOT NULL UNIQUE,
+    original_path TEXT NOT NULL UNIQUE,
     orientation INTEGER NOT NULL DEFAULT 0,
     size_bytes INTEGER NOT NULL,
     mime_type TEXT NOT NULL,

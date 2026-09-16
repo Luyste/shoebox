@@ -1,13 +1,45 @@
 package media
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+)
 
-var AllowedMimeTypes = map[string]string{"image/jpeg": "photo", "video/mp4": "video"}
+type Info struct {
+	Kind     string
+	MimeType string
+	Size     int
+	Checksum string
+}
 
-func detectMimeType(byte []byte) string {
-	return http.DetectContentType(byte)
+var allowedMimeTypes = map[string]string{"image/jpeg": "photo", "video/mp4": "video"}
+
+func detectMimeType(content []byte) string {
+	return http.DetectContentType(content)
 }
 
 func kindFromMimeType(mimeType string) (string, error) {
+	val, ok := allowedMimeTypes[mimeType]
 
+	if !ok {
+		return "", fmt.Errorf("unsupported mime type detected: %v", mimeType)
+	}
+	return val, nil
+}
+
+func Inspect(content []byte) (Info, error) {
+	mimeType := detectMimeType(content)
+	kind, err := kindFromMimeType(mimeType)
+	if err != nil {
+		return Info{}, err
+	}
+	size := len(content)
+	checksum := buildChecksum(content)
+
+	return Info{
+		Kind:     kind,
+		MimeType: mimeType,
+		Size:     size,
+		Checksum: checksum,
+	}, nil
 }

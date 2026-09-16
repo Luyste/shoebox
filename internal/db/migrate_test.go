@@ -62,11 +62,9 @@ func TestChecksumDrift(t *testing.T) {
 	err = Migrate(conn)
 	if err == nil {
 		t.Fatalf("migration after checksum invalidation was succesful")
-	}
-	if err != nil {
+	} else {
 		if !strings.Contains(err.Error(), "0001_init.sql") {
 			t.Errorf("expected error to contain filename, got: %v", err)
 		}
 	}
-
 }

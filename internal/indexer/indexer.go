@@ -4,8 +4,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/luyste/shoebox/internal/library"
@@ -16,6 +18,13 @@ type Indexer struct {
 	db          *sql.DB
 	lib         *library.Library
 	thumbnailer media.Thumbnailer
+	mu          sync.Mutex
+}
+
+type fileResult struct {
+	path string
+	id   string
+	err  error
 }
 
 var ErrDuplicate = errors.New("file already indexed")
@@ -26,6 +35,18 @@ func New(db *sql.DB, lib *library.Library, thumbnailer media.Thumbnailer) *Index
 		lib:         lib,
 		thumbnailer: thumbnailer,
 	}
+}
+
+func (idx *Indexer) cleanUp(dest string, id string) error {
+	if err := os.Remove(dest); err != nil {
+		return fmt.Errorf("removing file: %w", err)
+	}
+
+	_, err := idx.db.Exec("DELETE FROM media WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("deleting orphaned row %v: %w", id, err)
+	}
+	return nil
 }
 
 func (idx *Indexer) IndexFile(srcPath string) (string, error) {
@@ -40,33 +61,111 @@ func (idx *Indexer) IndexFile(srcPath string) (string, error) {
 	}
 
 	var existingID string
-	err = idx.db.QueryRow("SELECT id FROM media WHERE sha256 = ?", info.Checksum).Scan(&existingID)
 
-	switch {
-	case err == nil:
-		return existingID, ErrDuplicate
-	case errors.Is(err, sql.ErrNoRows):
-		newID := uuid.NewString()
-		ogfp := filepath.Join(idx.lib.OriginalDir(), newID+".jpg")
+	id, err := func() (string, error) {
+		idx.mu.Lock()
+		defer idx.mu.Unlock()
+
+		err = idx.db.QueryRow("SELECT id FROM media WHERE sha256 = ?", info.Checksum).Scan(&existingID)
+
+		if errors.Is(err, sql.ErrNoRows) {
+			newID := uuid.NewString()
+			originalName := filepath.Base(srcPath)
+			ogfp := filepath.Join(idx.lib.OriginalDir(), newID+".jpg")
+
+			_, err := idx.db.Exec("INSERT INTO media (id, sha256, kind, original_name, original_path, size_bytes, mime_type) VALUES (?, ?, ?, ?, ?, ?, ?)", newID, info.Checksum, info.Kind, originalName, ogfp, info.Size, info.MimeType)
+			if err != nil {
+				return "", err
+			}
+
+			return newID, nil
+		}
+
+		if err == nil {
+			return existingID, ErrDuplicate
+		}
+
+		return "", fmt.Errorf("checking for duplicate: %w", err)
+	}()
+
+	if err == nil {
+		ogfp := filepath.Join(idx.lib.OriginalDir(), id+".jpg")
+
 		if err := os.WriteFile(ogfp, content, 0o644); err != nil {
+			if err := idx.cleanUp(ogfp, id); err != nil {
+				return "", fmt.Errorf("cleanup file: %w", err)
+			}
 			return "", fmt.Errorf("writing file: %w", err)
 		}
 
-		thfp := filepath.Join(idx.lib.ThumbsDir(), newID+".jpg")
+		thfp := filepath.Join(idx.lib.ThumbsDir(), id+".jpg")
 		if err := idx.thumbnailer.Thumbnail(ogfp, thfp); err != nil {
+			if err := idx.cleanUp(thfp, id); err != nil {
+				return "", fmt.Errorf("cleanup file: %w", err)
+			}
 			return "", fmt.Errorf("writing thumbnail: %w", err)
 		}
 
-		originalName := filepath.Base(srcPath)
-
-		_, err := idx.db.Exec("INSERT INTO media (id, sha256, kind, original_name, original_path, size_bytes, mime_type, thumb_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", newID, info.Checksum, info.Kind, originalName, ogfp, info.Size, info.MimeType, "done")
+		_, err = idx.db.Exec("UPDATE media SET thumb_state = 'done' WHERE id = ?", id)
 		if err != nil {
-			return "", fmt.Errorf("insert database: %w", err)
+			return "", fmt.Errorf("update database: %w", err)
 		}
 
-		return newID, nil
-
-	default:
-		return "", fmt.Errorf("checking for duplicate: %w", err)
+		return id, nil
 	}
+
+	return existingID, err
+}
+
+func (idx *Indexer) Index(root string) {
+	paths := make(chan string)
+	results := make(chan fileResult)
+
+	var workerCount int = 4
+	var wg sync.WaitGroup
+	var report []fileResult
+
+	go walkFileTree(root, paths)
+
+	for range workerCount {
+		wg.Go(func() {
+			for p := range paths {
+				id, err := idx.IndexFile(p)
+				res := fileResult{
+					path: p,
+					id:   id,
+					err:  err,
+				}
+				results <- res
+			}
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for res := range results {
+		report = append(report, res)
+	}
+
+	fmt.Printf("final result: %v", report)
+}
+
+func walkFileTree(root string, pathChan chan string) {
+	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walking file tree: %w", err)
+		}
+
+		if d.IsDir() {
+			return nil
+		}
+
+		pathChan <- path
+		return nil
+	})
+
+	close(pathChan)
 }

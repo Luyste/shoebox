@@ -5,10 +5,6 @@ import (
 	"path/filepath"
 )
 
-// This is the library package.
-// The library exists of 4 folders: originals, thumbs (thumbnails), tmp (temporary), db (database).
-// The library can be initialized using the New() function, it accepts a path parameter and build the lib relative to that path.
-
 type Library struct {
 	root string
 }
@@ -21,7 +17,7 @@ func (l *Library) DbPath() string      { return filepath.Join(l.root, "library.d
 func New(root string) (*Library, error) {
 	l := &Library{root: root}
 
-	for _, dir := range []string{l.OriginalDir(), l.ThumbsDir(), l.TmpDir(), l.DbPath()} {
+	for _, dir := range []string{l.OriginalDir(), l.ThumbsDir(), l.TmpDir()} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}

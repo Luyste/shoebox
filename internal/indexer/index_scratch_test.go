@@ -125,3 +125,15 @@ func TestIndexScratchThumbState(t *testing.T) {
 		t.Errorf("want 1 thumbnail file, got %d", len(thumbs))
 	}
 }
+
+func TestIndexScratchWalkError(t *testing.T) {
+	libRoot := t.TempDir()
+	lib, _ := library.New(libRoot)
+	conn, _ := db.Connect(lib.DbPath())
+	defer conn.Close()
+	db.Migrate(conn)
+
+	idx := New(conn, lib, media.VipsThumbnailer{})
+	res := idx.Index("/this/path/does/not/exist")
+	t.Logf("result: %+v", res)
+}

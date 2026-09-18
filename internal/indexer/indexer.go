@@ -21,10 +21,18 @@ type Indexer struct {
 	mu          sync.Mutex
 }
 
-type fileResult struct {
-	path string
-	id   string
-	err  error
+type FileResult struct {
+	Path string
+	Id   string
+	Err  error
+}
+
+type Result struct {
+	Indexed int
+	Skipped int
+	Failed  int
+	Files   []FileResult
+	Err     error
 }
 
 var ErrDuplicate = errors.New("file already indexed")
@@ -34,6 +42,72 @@ func New(db *sql.DB, lib *library.Library, thumbnailer media.Thumbnailer) *Index
 		db:          db,
 		lib:         lib,
 		thumbnailer: thumbnailer,
+	}
+}
+
+func (idx *Indexer) Index(root string) Result {
+	paths := make(chan string)
+	results := make(chan FileResult)
+	walkErr := make(chan error, 1)
+
+	const workerCount int = 4
+	var wg sync.WaitGroup
+	var report []FileResult
+	var indexedCount, skippedCount, failedCount int
+
+	go func() {
+		walkErr <- walkFileTree(root, paths)
+	}()
+
+	for range workerCount {
+		wg.Go(func() {
+			for p := range paths {
+				id, err := idx.IndexFile(p)
+
+				res := FileResult{
+					Path: p,
+					Id:   id,
+					Err:  err,
+				}
+				results <- res
+			}
+		})
+	}
+
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for res := range results {
+		switch {
+		case errors.Is(res.Err, ErrDuplicate):
+			skippedCount++
+		case res.Err == nil:
+			indexedCount++
+		default:
+			failedCount++
+		}
+
+		report = append(report, res)
+	}
+
+	if err := <-walkErr; err != nil {
+		return Result{
+			Indexed: indexedCount,
+			Skipped: skippedCount,
+			Failed:  failedCount,
+			Files:   nil,
+			Err:     err,
+		}
+	}
+
+	return Result{
+		Files:   report,
+		Indexed: indexedCount,
+		Skipped: skippedCount,
+		Failed:  failedCount,
+		Err:     nil,
 	}
 }
 
@@ -117,44 +191,8 @@ func (idx *Indexer) IndexFile(srcPath string) (string, error) {
 	return existingID, err
 }
 
-func (idx *Indexer) Index(root string) {
-	paths := make(chan string)
-	results := make(chan fileResult)
-
-	var workerCount int = 4
-	var wg sync.WaitGroup
-	var report []fileResult
-
-	go walkFileTree(root, paths)
-
-	for range workerCount {
-		wg.Go(func() {
-			for p := range paths {
-				id, err := idx.IndexFile(p)
-				res := fileResult{
-					path: p,
-					id:   id,
-					err:  err,
-				}
-				results <- res
-			}
-		})
-	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	for res := range results {
-		report = append(report, res)
-	}
-
-	fmt.Printf("final result: %v", report)
-}
-
-func walkFileTree(root string, pathChan chan string) {
-	filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+func walkFileTree(root string, pathChan chan string) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fmt.Errorf("walking file tree: %w", err)
 		}
@@ -168,4 +206,5 @@ func walkFileTree(root string, pathChan chan string) {
 	})
 
 	close(pathChan)
+	return err
 }

@@ -5,11 +5,9 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
-	"github.com/luyste/shoebox/internal/api"
 	"github.com/luyste/shoebox/internal/db"
 	"github.com/luyste/shoebox/internal/library"
+	"github.com/luyste/shoebox/internal/web"
 )
 
 func main() {
@@ -32,11 +30,8 @@ func main() {
 		log.Fatalf("failed to apply migrations: %v", err)
 	}
 
-	a := api.New(conn, lib)
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
+	mux := web.New(conn, lib).Router()
+	h := web.Logger(mux)
 
-	r.Mount("/api", a.Router())
-
-	log.Fatal(http.ListenAndServe(":3000", r))
+	log.Fatal(http.ListenAndServe(":3000", h))
 }

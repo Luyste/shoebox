@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"flag"
 	"log"
 	"net/http"
@@ -9,6 +10,9 @@ import (
 	"github.com/luyste/shoebox/internal/library"
 	"github.com/luyste/shoebox/internal/web"
 )
+
+//go:embed static
+var staticFS embed.FS
 
 func main() {
 	var dir string
@@ -30,7 +34,7 @@ func main() {
 		log.Fatalf("failed to apply migrations: %v", err)
 	}
 
-	mux := web.New(conn, lib).Router()
+	mux := web.New(conn, lib, &staticFS).Router()
 	h := web.Logger(mux)
 
 	log.Fatal(http.ListenAndServe(":3000", h))

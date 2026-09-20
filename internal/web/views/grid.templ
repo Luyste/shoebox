@@ -1,5 +1,26 @@
 package views
 
-templ Hello(name string) {
-	<div>Hello, { name }</div>
+type Media struct {
+	OriginalName string
+	Id           string
+	Thumb        string
+}
+
+templ Card(media Media) {
+	<div class="col-span-1">
+		<img src={ "/thumbs/" + media.Id + ".jpg" }/>
+		<p>
+			{ media.OriginalName }
+		</p>
+		<!-- TODO: wire href once download handler exists -->
+		<button>Download</button>
+	</div>
+}
+
+templ Grid(media []Media) {
+	<div class="grid grid-cols-4 gap-4">
+		for _, m := range media {
+			@Card(m)
+		}
+	</div>
 }

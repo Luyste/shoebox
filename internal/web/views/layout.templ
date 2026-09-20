@@ -13,3 +13,9 @@ templ Layout(title string) {
 		</body>
 	</html>
 }
+
+templ Page(cards []Media) {
+	@Layout("Photos") {
+		@Grid(cards)
+	}
+}
